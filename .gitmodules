@@ -1,12 +1,10 @@
 [submodule "zenon-sdk-cpp"]
 	path = zenon-sdk-cpp
 	url = https://github.com/dumeriz/zenon-sdk-cpp
-[submodule "thirdparty/Lyra"]
-	path = thirdparty/Lyra
-	url = https://github.com/bfgroup/Lyra.git
 [submodule "thirdparty/quill"]
 	path = thirdparty/quill
 	url = https://github.com/odygrd/quill.git
 [submodule "thirdparty/uWebSockets"]
 	path = thirdparty/uWebSockets
 	url = https://github.com/uNetworking/uWebSockets
+    ignore = dirty

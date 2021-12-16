@@ -3,9 +3,8 @@
 #include "connection_ws.hpp" // zenon-sdk-cpp
 #include "quill/detail/LogMacros.h"
 
-#include <quill/Quill.h>
-
 #include <cstdint>
+#include <quill/Quill.h>
 #include <string>
 
 namespace proxy::handler
@@ -25,5 +24,7 @@ namespace proxy::handler
             return response;
             // return client_.Send(request);
         }
+
+        operator bool() const { return client_.connected(); }
     };
 } // namespace proxy::handler

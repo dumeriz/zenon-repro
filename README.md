@@ -28,18 +28,21 @@
    make -j8
    ```
 
+### Configuration
+The resulting binary `znn-repro` has to be configured in a configuration file.
+You can use the `create_configuration.py` script to generate one. Note that you have to run that under the account that you will use to
+run `znn-repro`, i.e. if you want to use secure websockets, which require root privileges, run
+```
+python3 create_configuration.py
+```
+and input the required data. A `config.json` file will then be generated in `/home/<your-username>/.config/znn-repro` or `/root/.config/znn-repro`.
+
+### Installing
+If you run with root privileges, you can install the tool: `sudo make install`. `which znn-repro` should then print the path it installed to,
+probably `/usr/local/bin`.
+
 ### Running
-The resulting binary `reverse_proxy` has several options. Just executing it without arguments prints a help text.
-Examples:
-- Start the listener on port 8085. Enable secure websockets by passing the directory containing the files `privkey.pem` and `fullchain.pem`:
-  ```
-  sudo ./reverse_proxy -p 8085 -c /etc/letsencrypt/live/<your-domain-name>
-  ```
-- Start the listener on port 8085. Use unsecure sockets and only a single listener thread. Specify a timeout of 20 milliseconds for calls to
-  znnd, which listens on non-standard port 3333 for incoming websocket connections:
-  ```
-  ./reverse_proxy -p 8085 -z 3333 -n 1 -t 20
-  ```
+Execute `znn-repro` if you installed it, or `/path/to/znn-repro` else.
 
 ### Tests
 A python script lives in directory `test`. Put that on a client computer and use it to test response times for two different scenarios:

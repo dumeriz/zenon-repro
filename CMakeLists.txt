@@ -37,9 +37,6 @@ find_package(ZLIB)
 add_definitions(-DQUILL_NOFN_MACROS=1) # some compilers can't resolve __FUNCTION__ in lambdas; needing the _NOFN-logger macros therefore
 add_subdirectory(thirdparty/quill)
 
-# commandline parsing, header only
-set(lyra_include "${PROJECT_SOURCE_DIR}/thirdparty/Lyra/include")
-
 # websocket client, connection to znnd
 # no need to build it currently, just using the connection_ws header
 #add_subdirectory(zenon-sdk-cpp)
@@ -57,21 +54,32 @@ find_package(Threads REQUIRED)
 
 file(GLOB SRC src/*.cpp)
 
-add_executable(reverse_proxy ${SRC})
-target_include_directories(reverse_proxy 
-    PRIVATE "${PROJECT_SOURCE_DIR}/include" 
+add_executable(znn_repro ${SRC})
+
+target_include_directories(znn_repro
+    PRIVATE "${PROJECT_SOURCE_DIR}/include"
     PRIVATE ${lyra_include}
     PRIVATE ${uws_include}
     PRIVATE ${us_include}
     PRIVATE ${sdk_include})
-target_link_libraries(reverse_proxy 
-    Threads::Threads 
-    ZLIB::ZLIB 
-    quill::quill 
-    "${ssl_lib}" 
+
+target_link_libraries(znn_repro
+    Threads::Threads
+    ZLIB::ZLIB
+    quill::quill
+    "${ssl_lib}"
     "${us_lib}"
     "${crypto_lib}"
     "${decrepit_lib}")
+
+### install
+
+include(GNUInstallDirs)
+install(TARGETS znn_repro
+    EXPORT znn-repro
+    CONFIGURATIONS Release
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 
 ### cmake test discovery, only required if ctest is wanted
 

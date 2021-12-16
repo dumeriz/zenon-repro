@@ -2,7 +2,6 @@
 #include "WebSocket.h"
 #include "WebSocketData.h"
 #include "WebSocketProtocol.h"
-#include "handler_threadpool.hpp"
 #include "quill/detail/LogMacros.h"
 #include "request_handler.hpp"
 
@@ -38,13 +37,21 @@ namespace reverse
     } // namespace detail
 
     template <typename App>
-    inline auto listener(std::string_view mount_path, uint16_t port, uint16_t timeout, App&& uws_app)
+    inline auto listener(std::string_view mount_path, uint16_t port, uint16_t node_port, uint16_t timeout,
+                         App&& uws_app)
     {
         constexpr auto is_ssl = detail::ssl_bool<App>::ssl;
         using TApp = typename uWS::TemplatedApp<is_ssl>;
 
         auto* logger{quill::get_logger()};
-        proxy::handler::handler handler{"ws://localhost", 35998};
+
+        proxy::handler::handler handler("ws://localhost", node_port);
+
+        if (!handler)
+        {
+            LOG_ERROR_NOFN(logger, "No connection to the node");
+            return;
+        }
 
         // keep the lambdas more readable by preventing clang-format from putting the brace at the line end
         // clang-format off
@@ -56,6 +63,12 @@ namespace reverse
             if (opcode != uWS::TEXT)
             {
                 LOG_WARNING_NOFN(logger, "Ignoring non-TEXT message (opcode {})", static_cast<int>(opcode));
+                return;
+            }
+
+            if (!handler)
+            {
+                LOG_ERROR_NOFN(logger, "Handler in invalid state; discarding message");
                 return;
             }
 
