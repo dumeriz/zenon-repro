@@ -11,15 +11,15 @@
    sudo ufw allow http
    # execute certbot and follow the instructions to retrieve an ssl certificate
    ```
+   See also https://certbot.eff.org/instructions.
 
 2. A number of thirdparty repositories are used. To initialize them, run `git submodule update --init --recursive` in the project root.
 
 3. For the websocket server part, uWebSockets are used (https://github.com/uNetworking/uWebSockets). The code should now exist in `thirdparty`.
    This library must be built with SSL-support once. From the projects root:
    ```
-   cd uWebSockets/uSockets/ && make -j8 boringssl && cd ../..
-   cd uWebSockets/uSockets/ && WITH_BORINGSSL=1 make -j8 && cd ../..
-   cd uWebSockets/ && WITH_BORINGSSL=1 make -j8 && cd ..
+   cd thirdparty/uWebSockets/uSockets/ && make -j8 boringssl && cd ../../..
+   cd thirdparty/uWebSockets/ && WITH_BORINGSSL=1 make -j8 && cd ../..
    ```
 
 4. Build this project.
