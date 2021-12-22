@@ -13,6 +13,11 @@
    ```
    See also https://certbot.eff.org/instructions.
 
+3. Install the systemd development files:
+   ```
+   sudo apt install libsystemd-dev
+   ```
+
 2. A number of thirdparty repositories are used. To initialize them, run `git submodule update --init --recursive` in the project root.
 
 3. For the websocket server part, uWebSockets are used (https://github.com/uNetworking/uWebSockets). The code should now exist in `thirdparty`.
@@ -25,7 +30,7 @@
 4. Build this project.
    ```
    mkdir build && cd build && cmake ..
-   make -j8
+   sudo make -j8 install
    ```
 
 ### Configuration
@@ -48,4 +53,3 @@ Execute `znn-repro` if you installed it, or `/path/to/znn-repro` else.
 A python script lives in directory `test`. Put that on a client computer and use it to test response times for two different scenarios:
 1. Multiple clients connect concurrently, each sending a single request.
 2. A single client connects and sends multiple requests concurrently.
-

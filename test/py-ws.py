@@ -39,7 +39,7 @@ async def do_request(websocket, request, timeout):
     if not silence: print(f"{result}")
 
 # Executing a single client with concurrent requests
-class parcli:
+class concli:
 
     def __init__(self, endpoint, calls):
         self.address = endpoint
@@ -74,8 +74,9 @@ async def run(cli, host, amount):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Exercise the reverse proxy with some stresstest')
     parser.add_argument('host', help='Address+port where the proxy is running (ex. wss://my.domain:443)')
-    parser.add_argument('-m --mode', dest='mode', default='par', choices=['mcl', 'par'], help='"mcl": Multiple clients; "par": 1 client, concurrent requests')
-    parser.add_argument('-n --n', dest='amount', type=int, default=100, help='Amount of requests for par or seq modes')
+    parser.add_argument('-m --mode', dest='mode', default='scc', choices=['mcc', 'scc'],
+            help='"mcc": Concurrent clients; "scc": 1 client, concurrent requests')
+    parser.add_argument('-n --n', dest='amount', type=int, default=100, help='Amount of clients / requests')
     parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', help='Output requests and responses if given')
 
     args = parser.parse_args(sys.argv[1:])
@@ -95,10 +96,10 @@ if __name__ == "__main__":
 
     start = time.time()
 
-    if args.mode == "mcl":
+    if args.mode == "mcc":
         asyncio.run(run(multicli, args.host, args.amount))
-    elif args.mode == "par":
-        asyncio.run(run(parcli, args.host, args.amount))
+    elif args.mode == "scc":
+        asyncio.run(run(concli, args.host, args.amount))
         
     end = time.time()
     print(f"Execution finished in {end - start} seconds")

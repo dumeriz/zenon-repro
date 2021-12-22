@@ -8,9 +8,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
+# default to Release type
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif (NOT CMAKE_BUILD_TYPE)
+
 ### subprojects and libraries
 
+include(FindPkgConfig)
 include(ExternalProject)
+pkg_check_modules(SYSTEMD REQUIRED libsystemd)
 
 # websockets
 # can't really add more complex make commands here, so uWS must be built seperately
@@ -57,7 +64,6 @@ file(GLOB SRC src/*.cpp)
 add_executable(znn_repro ${SRC})
 
 target_include_directories(znn_repro
-    PRIVATE "${PROJECT_SOURCE_DIR}/include"
     PRIVATE ${lyra_include}
     PRIVATE ${uws_include}
     PRIVATE ${us_include}
@@ -67,6 +73,7 @@ target_link_libraries(znn_repro
     Threads::Threads
     ZLIB::ZLIB
     quill::quill
+    "${SYSTEMD_LIBRARIES}"
     "${ssl_lib}"
     "${us_lib}"
     "${crypto_lib}"
@@ -76,9 +83,12 @@ target_link_libraries(znn_repro
 
 include(GNUInstallDirs)
 install(TARGETS znn_repro
-    EXPORT znn-repro
     CONFIGURATIONS Release
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(FILES service/znn-repro.service
+    DESTINATION /etc/systemd/system/
+    CONFIGURATIONS RELEASE)
 
 
 ### cmake test discovery, only required if ctest is wanted

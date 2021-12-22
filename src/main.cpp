@@ -1,102 +1,160 @@
 #include "config.hpp"
+#include "proxy_fabric.hpp"
+#include "quill/LogLevel.h"
 #include "quill/detail/LogMacros.h"
-#include "request_handler.hpp"
-#include "wss_listener.hpp"
 
-#include <App.h> // websockets
+#include <atomic>
+
 #include <algorithm>
+#include <csignal>
+#include <exception>
 #include <filesystem>
 #include <fstream>
-#include <quill/Quill.h> // logging
 #include <stdexcept>
 #include <thread>
 
-int main(int argc, char** argv)
-{
-    proxy::config::options config;
-    try
-    {
-        config = proxy::config::read_config_file();
-    }
-    catch (std::runtime_error const& e)
-    {
-        std::cerr << "Error reading the configuration file from " << proxy::config::get_config_file() << ":"
-                  << std::endl
-                  << e.what() << std::endl;
-        return -1;
-    }
-    catch (nlohmann::json::parse_error const& pe)
-    {
-        std::cerr << "Error reading the configuration:" << std::endl << pe.what() << std::endl;
-        return -1;
-    }
+#include <systemd/sd-daemon.h>
+#include <systemd/sd-journal.h>
 
+#include <quill/Quill.h> // logging
+
+std::atomic_bool sigterm{};
+
+auto systemd_signal(std::string_view state)
+{
+    bool unset_environment = false;
+    (void)sd_notify(static_cast<int>(unset_environment), state.data());
+}
+
+auto sigterm_handler(int) -> void
+{
+    sigterm.store(true);
+    systemd_signal("STOPPING=1");
+}
+
+auto sigint_handler(int) -> void { sigterm.store(true); }
+
+// printing to cerr and systemd log
+template <typename... Args> auto log_error(Args&&... args)
+{
+    std::ostringstream oss;
+    (oss << ... << args);
+    std::cerr << oss.str() << std::endl;
+    sd_journal_print(LOG_ERR, "%s", oss.str().data());
+}
+
+template <typename... Args> auto log_debug(Args&&... args)
+{
+#ifndef NDEBUG
+    (std::cout << ... << args);
+#endif
+}
+
+template <typename... Args> auto log_and_signal_error(int errnum, Args&&... args)
+{
+    log_error(std::forward<Args>(args)...);
+    systemd_signal("ERRNO=" + std::to_string(-errnum));
+    return -errnum;
+}
+
+auto setup_logging(quill::LogLevel loglevel)
+{
     quill::enable_console_colours();
     quill::start();
 
     auto* logger{quill::get_logger()};
-    logger->set_log_level(quill::LogLevel::TraceL3);
+    logger->set_log_level(loglevel);
+}
+
+auto check_for_certfiles(std::filesystem::path keyfile, std::filesystem::path certfile) -> std::optional<std::string>
+{
+    auto certpath = keyfile.parent_path();
+    log_debug("Reading privkey and fullchain from %s", certpath);
+
+    try
+    {
+        if (!(std::filesystem::exists(certpath) && std::filesystem::is_regular_file(keyfile) &&
+              std::filesystem::is_regular_file(certfile)))
+        {
+            return std::make_optional<std::string>("Could not read certificates from " + certpath.string());
+        }
+    }
+    catch (std::filesystem::filesystem_error const& err)
+    {
+        return std::make_optional<std::string>(err.what());
+    }
+
+    return std::nullopt;
+}
+
+auto run_until_signalled()
+{
+    while (!sigterm.load())
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
+int main(int argc, char** argv)
+{
+    reverse::config::options config;
+    try
+    {
+        config = reverse::config::read_config_file();
+    }
+    catch (std::exception const& e)
+    {
+        return log_and_signal_error(1, "Error reading the configuration file from ",
+                                    reverse::config::detail::get_config_file(), ":", e.what());
+    }
+
+    setup_logging(reverse::config::quill_log_level(config));
+    log_debug(reverse::config::to_string(config));
+
     std::filesystem::path certs{config.certpath};
 
     auto const keyfile = certs / "privkey.pem";
     auto const certfile = certs / "fullchain.pem";
-    bool file_error{};
 
     if (config.ssl)
     {
-        LOG_INFO(logger, "Reading privkey and fullchain from {}", certs);
-
-        try
+        if (auto certfile_error = check_for_certfiles(keyfile, certfile); certfile_error)
         {
-            file_error = !(std::filesystem::exists(certs) && std::filesystem::is_regular_file(keyfile) &&
-                           std::filesystem::is_regular_file(certfile));
-        }
-        catch (std::filesystem::filesystem_error const& err)
-        {
-            std::cerr << err.what() << std::endl;
-            file_error = true;
+            return log_and_signal_error(2, "SSL-configuration failure: ", certfile_error.value());
         }
     }
 
-    if (config.ssl && file_error)
+    std::signal(SIGTERM, sigterm_handler); // signal send by systemd
+    std::signal(SIGINT, sigterm_handler);  // when run manually, catch ctrl-c
+
+    reverse::proxy_fabric fabric;
+    std::vector<std::pair<bool, size_t>> start_results;
+
+    for (size_t i{}; i < config.threads; i++)
     {
-        std::cerr << "SSL-configuration failure" << std::endl;
-        return 0;
+        start_results.push_back(fabric.add_proxy(config.ssl ? reverse::proto::wss : reverse::proto::ws,
+                                                 {.public_port = config.port,
+                                                  .znn_node_url = "ws://localhost",
+                                                  .znn_node_port = config.znn_ws_port,
+                                                  .timeout = config.timeout,
+                                                  .keyfile = keyfile,
+                                                  .certfile = certfile}));
     }
 
-    LOG_INFO(logger, "Starting {} listener with {} threads on port {}", config.ssl ? "secure" : "insecure",
-             config.threads, config.port);
-
-    std::vector<std::thread> server_threads;
-    if (config.ssl)
+    if (std::all_of(start_results.begin(), start_results.end(), [](auto res) { return res.first; }))
     {
-        for (size_t i{1}; i <= config.threads; i++)
-        {
-            server_threads.emplace_back([&] {
-                reverse::listener<uWS::SSLApp>(
-                    "/*", config.port, config.znn_ws_port, config.timeout,
-                    uWS::SSLApp({.key_file_name = keyfile.c_str(), .cert_file_name = certfile.c_str()}));
-            });
-        }
+        systemd_signal("READY=1");
+        run_until_signalled();
     }
-
     else
     {
-        for (size_t i{1}; i <= config.threads; i++)
-        {
-            server_threads.emplace_back([&] {
-                reverse::listener<uWS::App>("/*", config.port, config.znn_ws_port, config.timeout, uWS::App{});
+        auto failed_proxies =
+            std::accumulate(start_results.begin(), start_results.end(), std::string(), [](auto acc, auto res) {
+                return acc + (res.first ? "" : "[" + std::to_string(res.second) + "]");
             });
-        }
+        return log_and_signal_error(3, "Error starting proxies " + failed_proxies);
     }
 
-    // todo (necessary?): share a state variable with the listeners so that they can signal when they stop due to
-    // errors.
-    //                    iterate over these variables periodically and try to join/restart failed listeners.
-    for (auto&& t : server_threads)
-    {
-        t.join();
-    }
-
-    // We never reach this currently; the threaded listeners can't be stopped
+    systemd_signal("STOPPING=1");
+    fabric.close();
 }

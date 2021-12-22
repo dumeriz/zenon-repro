@@ -1,0 +1,16 @@
+[Unit]
+Description=Reverse Proxy for a Zenon Node
+# BindsTo=go-zenon.service
+# After=go-zenon.service
+[Service]
+Type=notify
+NotifyAccess=main
+User=root
+Group=root
+ExecStart=/usr/local/bin/znn_repro
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=10
+TimeoutStopSec=10
+[Install]
+WantedBy=multi-user.target
