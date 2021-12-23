@@ -8,6 +8,7 @@ import random
 import string
 import time
 import argparse
+import multiprocessing
 
 global silence
 
@@ -31,12 +32,12 @@ def make_requests(num):
 	
 # Preventing hangups with wait_for, in case the server is currently testing low timeout limits;
 # not catching any errors though so timeouts will kill the process.
-async def do_request(websocket, request, timeout):
-    if not silence: print(f"Sending request {request}")
+async def do_request(websocket, request, timeout, verbose=False):
+    if verbose: print(f"Sending request {request}")
     await asyncio.wait_for(websocket.send(request), timeout=timeout)
-    if not silence: print(f"Awaiting result")
+    if verbose: print(f"Awaiting result")
     result = await asyncio.wait_for(websocket.recv(), timeout=timeout)
-    if not silence: print(f"{result}")
+    if verbose: print(f"{result}")
 
 # Executing a single client with concurrent requests
 class concli:
@@ -46,7 +47,7 @@ class concli:
         self.requests = make_requests(calls)
     
     async def call(self, websocket, request):
-        await do_request(websocket, request, 2)
+        await do_request(websocket, request, 2, not silence)
 
     async def run(self):
         async with websockets.connect(self.address) as websocket:
@@ -62,11 +63,34 @@ class multicli:
     
     async def call(self, request):
         async with websockets.connect(self.address) as websocket:
-            await do_request(websocket, request, 2)
+            await do_request(websocket, request, 2, not silence)
 
     async def run(self):
         for r in self.requests:
             await self.call(r)
+
+# Executing multiple clients from multiple processes, each encapsulating a concli
+def run_client_process(client, verbose):
+    global silence
+    silence = not verbose
+    try:
+        asyncio.run(client.run())
+    except TimeoutError:
+        print("TIMEOUT")
+
+class parcli:
+
+    def __init__(self, endpoint, clients, calls):
+        self.clients = [concli(endpoint, calls) for i in range(clients)]
+
+    def run(self):
+        processes = [multiprocessing.Process(target=run_client_process, args=(client, not silence)) for client in self.clients]
+
+        for p in processes:
+            p.start()
+        for p in processes:
+            p.join()
+
 
 async def run(cli, host, amount):
     await cli(host, amount).run()
@@ -74,13 +98,13 @@ async def run(cli, host, amount):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Exercise the reverse proxy with some stresstest')
     parser.add_argument('host', help='Address+port where the proxy is running (ex. wss://my.domain:443)')
-    parser.add_argument('-m --mode', dest='mode', default='scc', choices=['mcc', 'scc'],
-            help='"mcc": Concurrent clients; "scc": 1 client, concurrent requests')
+    parser.add_argument('-m --mode', dest='mode', default='scc', choices=['mcc', 'scc', 'pcc'],
+            help='"mcc": Concurrent clients; "scc": 1 client, concurrent requests; "pcc": multiple parallel clients with concurrent requests')
     parser.add_argument('-n --n', dest='amount', type=int, default=100, help='Amount of clients / requests')
+    parser.add_argument('-r --requests', dest='requests', type=int, default=100, help='Amount of requests if mode is pcc')
     parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', help='Output requests and responses if given')
 
     args = parser.parse_args(sys.argv[1:])
-    print(f"{args.host}, {args.mode}, {args.amount}, {args.verbose}")
 
     host_parts = args.host.split(':')
     try:
@@ -100,6 +124,8 @@ if __name__ == "__main__":
         asyncio.run(run(multicli, args.host, args.amount))
     elif args.mode == "scc":
         asyncio.run(run(concli, args.host, args.amount))
+    elif args.mode == "pcc":
+        parcli(args.host, args.amount, args.requests).run()
         
     end = time.time()
     print(f"Execution finished in {end - start} seconds")

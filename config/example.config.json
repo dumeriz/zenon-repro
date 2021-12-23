@@ -1,8 +1,17 @@
 {
-    "threads": 5,
-    "wss": false,
-    "timeout": 25,
-    "znn_port": 35998,
-    "listen_port": 8001,
-    "loglevel": "info"
+    "proxies": [
+        {
+            "node": "ws://localhost:35998",
+            "wss": false,
+            "port": 8001,
+            "timeout": 20
+        },
+        {
+            "node": "ws://localhost:35998",
+            "wss": false,
+            "port": 8001,
+            "timeout": 120
+        }
+    ],
+    "certificates": ""
 }

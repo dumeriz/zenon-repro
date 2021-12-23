@@ -1,6 +1,8 @@
 #pragma once
 
 #include "quill/LogLevel.h"
+#include <exception>
+#include <ios>
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
@@ -14,27 +16,52 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <unordered_map>
+#include <vector>
 
 namespace reverse::config
 {
+    class exception : public std::exception
+    {
+        std::string const reason_;
+
+    public:
+        explicit exception(std::string_view reason) : std::exception{}, reason_{reason} {}
+
+        auto what() const noexcept -> char const* override { return reason_.data(); }
+    };
+
+    struct proxy
+    {
+        std::string node;
+        bool wss;
+        uint16_t port;
+        uint16_t timeout;
+    };
+
     struct options
     {
-        uint16_t threads;
-        uint16_t port;
-        uint16_t znn_ws_port;
-        uint16_t timeout;
-        bool ssl;
-        std::string certpath;
-        std::string loglevel;
+        std::vector<proxy> proxies;
+        std::string certificates;
     };
+
+    auto operator<<(std::ostream& os, proxy const& proxy) -> std::ostream&
+    {
+        os << "Node=" << proxy.node << ", WSS=" << std::boolalpha << proxy.wss << ", Port=" << proxy.port
+           << ", Timeout=" << proxy.timeout;
+        return os;
+    }
 
     auto operator<<(std::ostream& os, options const& opt) -> std::ostream&
     {
-        os << "Threads=" << opt.threads << ",Port=" << opt.port << ",Node Port=" << opt.znn_ws_port
-           << ", Timeout=" << opt.timeout << ", SSL=" << opt.ssl;
-        if (opt.ssl) os << ", Certpath=" << opt.certpath;
-        os << ", Loglevel=" << opt.loglevel;
-
+        os << "Proxies: " << std::endl;
+        for (size_t i{}; i < opt.proxies.size(); i++)
+        {
+            os << " " << i << ": " << opt.proxies[i] << std::endl;
+        }
+        if (!opt.certificates.empty())
+        {
+            os << opt.certificates << std::endl;
+        }
         return os;
     }
 
@@ -71,9 +98,26 @@ namespace reverse::config
                 return object.at(key.data()).get<T>(); // throws if wrong type
             }
 
-            throw std::runtime_error{std::string("Key ") + key.data() + " missing"};
+            throw exception{std::string("Key ") + key.data() + " missing"};
         }
     } // namespace detail
+
+    inline auto any_wss(options const& opts)
+    {
+        return std::any_of(opts.proxies.begin(), opts.proxies.end(), [](auto&& proxy) { return proxy.wss; });
+    }
+
+    inline auto node_url(proxy const& proxy)
+    {
+        auto end = proxy.node.find_last_of(':');
+        return end != std::string::npos ? proxy.node.substr(0, end) : "";
+    }
+
+    inline auto node_port(proxy const& proxy) -> uint16_t
+    {
+        auto end = proxy.node.find_last_of(':');
+        return end != std::string::npos && end < proxy.node.size() ? std::stol(proxy.node.substr(end + 1)) : 1;
+    }
 
     inline auto read_config_file() -> options
     {
@@ -81,19 +125,30 @@ namespace reverse::config
 
         if (ifs.is_open())
         {
+            options opts;
             auto const json = nlohmann::json::parse(ifs);
-            auto const wss = detail::get_or_throw<bool>(json, "wss");
+            auto const proxies = detail::get_or_throw<nlohmann::json>(json, "proxies");
+            for (auto&& proxy : proxies)
+            {
+                auto const node = detail::get_or_throw<std::string>(proxy, "node");
+                auto const wss = detail::get_or_throw<bool>(proxy, "wss");
+                auto const port = detail::get_or_throw<uint16_t>(proxy, "port");
+                auto const timeout = detail::get_or_throw<uint16_t>(proxy, "timeout");
 
-            return {.threads = detail::get_or_throw<uint16_t>(json, "threads"),
-                    .port = detail::get_or_throw<uint16_t>(json, "listen_port"),
-                    .znn_ws_port = detail::get_or_throw<uint16_t>(json, "znn_port"),
-                    .timeout = detail::get_or_throw<uint16_t>(json, "timeout"),
-                    .ssl = wss,
-                    .certpath = wss ? detail::get_or_throw<std::string>(json, "certificates_path") : "",
-                    .loglevel = detail::get_or_throw<std::string>(json, "loglevel")};
+                opts.proxies.push_back({.node = node, .wss = wss, .port = port, .timeout = timeout});
+            }
+
+            opts.certificates = detail::get_or_throw<std::string>(json, "certificates");
+
+            if (opts.certificates.empty() && any_wss(opts))
+            {
+                throw exception{"Key 'certificates' empty but wss requested"};
+            }
+
+            return opts;
         }
 
-        throw std::runtime_error{"Could not read configuration file"};
+        throw exception{"Could not read configuration file"};
     }
 
     inline auto quill_log_level(options const& opts)
@@ -104,10 +159,6 @@ namespace reverse::config
                                                                                  {"error", quill::LogLevel::Error},
                                                                                  {"all", quill::LogLevel::TraceL3}};
 
-        std::string normalized;
-        std::transform(opts.loglevel.begin(), opts.loglevel.end(), std::back_inserter(normalized),
-                       [](auto c) { return std::tolower(c); });
-
-        return mapping.contains(normalized) ? mapping.at(normalized) : quill::LogLevel::Info;
+        return mapping.at("info");
     }
 } // namespace reverse::config

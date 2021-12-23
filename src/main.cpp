@@ -111,12 +111,12 @@ int main(int argc, char** argv)
     setup_logging(reverse::config::quill_log_level(config));
     log_debug(reverse::config::to_string(config));
 
-    std::filesystem::path certs{config.certpath};
+    std::filesystem::path certs{config.certificates};
 
     auto const keyfile = certs / "privkey.pem";
     auto const certfile = certs / "fullchain.pem";
 
-    if (config.ssl)
+    if (reverse::config::any_wss(config))
     {
         if (auto certfile_error = check_for_certfiles(keyfile, certfile); certfile_error)
         {
@@ -130,15 +130,18 @@ int main(int argc, char** argv)
     reverse::proxy_fabric fabric;
     std::vector<std::pair<bool, size_t>> start_results;
 
-    for (size_t i{}; i < config.threads; i++)
+    for (auto&& proxy : config.proxies)
     {
-        start_results.push_back(fabric.add_proxy(config.ssl ? reverse::proto::wss : reverse::proto::ws,
-                                                 {.public_port = config.port,
-                                                  .znn_node_url = "ws://localhost",
-                                                  .znn_node_port = config.znn_ws_port,
-                                                  .timeout = config.timeout,
-                                                  .keyfile = keyfile,
-                                                  .certfile = certfile}));
+        auto const proto{proxy.wss ? reverse::proto::wss : reverse::proto::ws};
+        auto const node_url{reverse::config::node_url(proxy)};
+        auto const node_port{reverse::config::node_port(proxy)};
+
+        start_results.push_back(fabric.add_proxy(proto, {.public_port = proxy.port,
+                                                         .znn_node_url = node_url,
+                                                         .znn_node_port = node_port,
+                                                         .timeout = proxy.timeout,
+                                                         .keyfile = keyfile,
+                                                         .certfile = certfile}));
     }
 
     if (std::all_of(start_results.begin(), start_results.end(), [](auto res) { return res.first; }))

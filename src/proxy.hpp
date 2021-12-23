@@ -154,13 +154,14 @@ namespace reverse
 
                 if (opcode != uWS::TEXT)
                 {
-                    LOG_WARNING_NOFN(logger, "Ignoring non-TEXT message (opcode {})", static_cast<int>(opcode));
+                    LOG_WARNING_NOFN(logger, "{}: Ignoring non-TEXT message (opcode {})", id_,
+                                     static_cast<int>(opcode));
                     return;
                 }
 
                 if (!*node_link)
                 {
-                    LOG_ERROR_NOFN(logger, "Handler in invalid state; discarding message");
+                    LOG_ERROR_NOFN(logger, "{}: Handler in invalid state; discarding message", id_);
                     return;
                 }
 
@@ -171,20 +172,20 @@ namespace reverse
                 if (std::future_status::ready != result.wait_for(std::chrono::milliseconds(timeout)))
                 {
                     LOG_ERROR_NOFN(logger,
-                                   "TIMEOUT after {}ms awaiting the handler result\n"
+                                   "{}: TIMEOUT after {}ms awaiting the handler result\n"
                                    "If this happens often increase the timeout value",
-                                   timeout);
+                                   id_, timeout);
                     return;
                 }
 
                 auto const response = result.get();
 
-                LOG_DEBUG_NOFN(logger, "Received response {}", response);
+                LOG_DEBUG_NOFN(logger, "{}: Received response {}", id_, response);
 
                 using result_t = detail::uws_result_t<detail::ssl_bool<std::decay_t<App>>::ssl>;
                 if (auto code = ws->send(response, uWS::OpCode::TEXT); code != result_t::SUCCESS)
                 {
-                    LOG_ERROR_NOFN(logger, "SEND returned {}", code);
+                    LOG_ERROR_NOFN(logger, "{}: SEND returned {}", id_, code);
                 }
             };
 
@@ -193,25 +194,25 @@ namespace reverse
             auto const on_open = [this, logger](auto* ws) {
                 if (reject_connections_.load())
                 {
-                    LOG_DEBUG_NOFN(logger, "Rejecting connection from {}", ws->getRemoteAddressAsText());
+                    LOG_DEBUG_NOFN(logger, "{}: Rejecting connection from {}", id_, ws->getRemoteAddressAsText());
                     ws->close();
                 }
                 else
                 {
-                    LOG_INFO_NOFN(logger, "Connection from {}", ws->getRemoteAddressAsText());
+                    LOG_INFO_NOFN(logger, "{}: Connection from {}", id_, ws->getRemoteAddressAsText());
                 }
             };
 
-            auto const on_close = [logger](auto* ws, int code, std::string_view message) {
-                LOG_INFO_NOFN(logger, "CLOSE with remote={}. Code={}, message={}", ws->getRemoteAddressAsText(), code,
-                              message);
+            auto const on_close = [this, logger](auto* ws, int code, std::string_view message) {
+                LOG_INFO_NOFN(logger, "{}: CLOSE with remote={}. Code={}, message={}", id_,
+                              ws->getRemoteAddressAsText(), code, message);
             };
 
-            auto const on_drain = [logger](auto* ws) {
+            auto const on_drain = [this, logger](auto* ws) {
                 auto amount = ws->getBufferedAmount();
                 if (amount)
                 {
-                    LOG_DEBUG_NOFN(logger, "====> buffered data: {}", amount);
+                    LOG_DEBUG_NOFN(logger, "{}: ====> buffered data: {}", id_, amount);
                 }
             };
 
