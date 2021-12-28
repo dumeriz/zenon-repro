@@ -151,7 +151,7 @@ namespace reverse::config
         throw exception{"Could not read configuration file"};
     }
 
-    inline auto quill_log_level(options const& opts)
+    inline auto quill_log_level(options const&)
     {
         static const std::unordered_map<std::string, quill::LogLevel> mapping = {{"debug", quill::LogLevel::Debug},
                                                                                  {"info", quill::LogLevel::Info},

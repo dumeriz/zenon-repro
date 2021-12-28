@@ -95,7 +95,7 @@ auto run_until_signalled()
     }
 }
 
-int main(int argc, char** argv)
+int main(int, char**)
 {
     reverse::config::options config;
     try
