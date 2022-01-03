@@ -1,7 +1,5 @@
 #include "config.hpp"
 #include "proxy_fabric.hpp"
-#include "quill/LogLevel.h"
-#include "quill/detail/LogMacros.h"
 
 #include <atomic>
 
@@ -13,63 +11,47 @@
 #include <stdexcept>
 #include <thread>
 
+#ifdef NDEBUG
 #include <systemd/sd-daemon.h>
-#include <systemd/sd-journal.h>
+#endif
 
-#include <quill/Quill.h> // logging
+#include "logging.h"
 
 std::atomic_bool sigterm{};
 
 auto systemd_signal(std::string_view state)
 {
+#ifdef NDEBUG
     bool unset_environment = false;
     (void)sd_notify(static_cast<int>(unset_environment), state.data());
+#else
+    (void)state; // silence warning
+#endif
 }
 
 auto sigterm_handler(int) -> void
 {
     sigterm.store(true);
+#ifdef NDEBUG
     systemd_signal("STOPPING=1");
+#endif
 }
 
 auto sigint_handler(int) -> void { sigterm.store(true); }
 
-// printing to cerr and systemd log
-template <typename... Args> auto log_error(Args&&... args)
-{
-    std::ostringstream oss;
-    (oss << ... << args);
-    std::cerr << oss.str() << std::endl;
-    sd_journal_print(LOG_ERR, "%s", oss.str().data());
-}
-
-template <typename... Args> auto log_debug(Args&&... args)
-{
-#ifndef NDEBUG
-    (std::cout << ... << args);
-#endif
-}
-
 template <typename... Args> auto log_and_signal_error(int errnum, Args&&... args)
 {
-    log_error(std::forward<Args>(args)...);
+    logging::error(std::forward<Args>(args)...);
+#ifdef NDEBUG
     systemd_signal("ERRNO=" + std::to_string(-errnum));
+#endif
     return -errnum;
-}
-
-auto setup_logging(quill::LogLevel loglevel)
-{
-    quill::enable_console_colours();
-    quill::start();
-
-    auto* logger{quill::get_logger()};
-    logger->set_log_level(loglevel);
 }
 
 auto check_for_certfiles(std::filesystem::path keyfile, std::filesystem::path certfile) -> std::optional<std::string>
 {
     auto certpath = keyfile.parent_path();
-    log_debug("Reading privkey and fullchain from %s", certpath);
+    logging::debug("Reading privkey and fullchain from %s", certpath);
 
     try
     {
@@ -108,8 +90,7 @@ int main(int, char**)
                                     reverse::config::detail::get_config_file(), ":", e.what());
     }
 
-    setup_logging(reverse::config::quill_log_level(config));
-    log_debug(reverse::config::to_string(config));
+    logging::debug(reverse::config::to_string(config));
 
     std::filesystem::path certs{config.certificates};
 
@@ -151,10 +132,9 @@ int main(int, char**)
     }
     else
     {
-        auto failed_proxies =
-            std::accumulate(start_results.begin(), start_results.end(), std::string(), [](auto acc, auto res) {
-                return acc + (res.first ? "" : "[" + std::to_string(res.second) + "]");
-            });
+        auto failed_proxies = std::accumulate(
+            start_results.begin(), start_results.end(), std::string(),
+            [](auto acc, auto res) { return acc + (res.first ? "" : "[" + std::to_string(res.second) + "]"); });
         return log_and_signal_error(3, "Error starting proxies " + failed_proxies);
     }
 

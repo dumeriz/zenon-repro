@@ -32,8 +32,11 @@ Running this in front of a Zenon Node introduces some overhead, see [Performance
 3. The websocket server is built on uWebSockets (https://github.com/uNetworking/uWebSockets). The code should now exist in `thirdparty`.
    If wss functionality shall be used, this library must be built with SSL-support once. From the projects root:
    ```
+   # if SSL support from boringssl should be used:
    cd thirdparty/uWebSockets/uSockets/ && make -j8 boringssl && cd ../../..
    cd thirdparty/uWebSockets/ && WITH_BORINGSSL=1 make -j8 && cd ../..
+   # if openssl should be used:
+   cd thirdparty/uWebSockets/ && WITH_OPENSSL=1 make -j8 && cd ../..
    ```
    If you don't want to use secure sockets, skip the first step and remove the `WITH_BORINGSSL` from the second.
 

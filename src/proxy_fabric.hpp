@@ -1,7 +1,6 @@
 #include "proxy.hpp"
 
 #include <cstdint>
-#include <quill/Quill.h>
 #include <string>
 #include <vector>
 
@@ -32,8 +31,8 @@ namespace reverse
     public:
         auto add_proxy(proto type, proxy_opts opts) -> std::pair<bool, size_t>
         {
-            LOG_INFO(quill::get_logger(), "Starting {}-proxy for {}:{} <-> {}", type == proto::wss ? "wss" : "ws",
-                     opts.znn_node_url, opts.znn_node_port, opts.public_port);
+            logging::info("Starting {}-proxy for {}:{} <-> {}", type == proto::wss ? "wss" : "ws", opts.znn_node_url,
+                          opts.znn_node_port, opts.public_port);
 
             proxies_.emplace_back(proxies_.size(), opts.public_port, opts.znn_node_url, opts.znn_node_port);
 
@@ -60,7 +59,7 @@ namespace reverse
 
         auto close()
         {
-            LOG_INFO(quill::get_logger(), "Stopping all listeners");
+            logging::info("Stopping all listeners");
             for (auto&& proxy : proxies_)
             {
                 proxy.close();

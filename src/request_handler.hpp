@@ -1,11 +1,10 @@
 #pragma once
 
-#include "connection_ws.hpp" // zenon-sdk-cpp
-#include "quill/detail/LogMacros.h"
+#include "logging.h"
+#include <connection_ws.hpp> // zenon-sdk-cpp
 
 #include <chrono>
 #include <cstdint>
-#include <quill/Quill.h>
 #include <string>
 #include <thread>
 
@@ -23,11 +22,9 @@ namespace reverse
     class handler
     {
         std::unique_ptr<sdk::ws_connector> client_;
-        quill::Logger* logger_;
 
     public:
-        handler(std::string const& host, uint16_t port)
-            : client_{std::make_unique<sdk::ws_connector>(host, port)}, logger_{quill::get_logger()}
+        handler(std::string const& host, uint16_t port) : client_{std::make_unique<sdk::ws_connector>(host, port)}
         {
             if (!client_->connected())
             {
@@ -35,7 +32,7 @@ namespace reverse
             }
         }
 
-        handler(std::string const& host, uint16_t port, uint16_t timeout_s) : logger_{quill::get_logger()}
+        handler(std::string const& host, uint16_t port, uint16_t timeout_s)
         {
             auto timeout{std::chrono::system_clock::now() + std::chrono::seconds(timeout_s)};
 
@@ -56,7 +53,7 @@ namespace reverse
         inline auto operator()(std::string request)
         {
             auto response = client_->Send(request);
-            LOG_DEBUG(logger_, "{} => {}", request, response);
+            logging::debug("{} => {}", request, response);
             return response;
             // return client_.Send(request);
         }

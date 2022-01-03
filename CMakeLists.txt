@@ -8,10 +8,30 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(LINUX TRUE)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    message(FATAL_ERROR "Building on windows in not supported")
+endif()
+
+# if this is set, uWebSockets must have been built with boringssl support
+if (WITH_BORING_SSL)
+    set(BORING_SSL TRUE)
+endif()
+
+# Disable unused build types
+set (CMAKE_CONFIGURATION_TYPES "Release;Debug" CACHE STRING "Configurations" FORCE)
+
 # default to Release type
-if (NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
-endif (NOT CMAKE_BUILD_TYPE)
+if (${LINUX})
+    if (NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE Release)
+    endif()
+else()
+    set(CMAKE_BUILD_TYPE Debug) # no release build possible on macos
+endif()
+
+message(STATUS "Building in ${CMAKE_BUILD_TYPE} mode")
 
 set(CMAKE_CXX_FLAGS "-Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
@@ -21,7 +41,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Ofast -march=native")
 
 include(FindPkgConfig)
 include(ExternalProject)
-pkg_check_modules(SYSTEMD REQUIRED libsystemd)
 
 # websockets
 # can't really add more complex make commands here, so uWS must be built seperately
@@ -33,27 +52,47 @@ pkg_check_modules(SYSTEMD REQUIRED libsystemd)
 #    INSTALL_COMMAND ""
 #)
 
-set(uws_include "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/src/")
-set(us_include "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/src")
-set(us_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/uSockets.a")
-set(ssl_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/boringssl/build/ssl/libssl.a")
-set(crypto_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/boringssl/build/crypto/libcrypto.a")
-set(decrepit_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/boringssl/build/decrepit/libdecrepit.a")
-message(STATUS "ssl-lib=${ssl_lib}")
-
 # required by uWebSockets
 find_package(ZLIB)
 
-# logging
-add_definitions(-DQUILL_NOFN_MACROS=1) # some compilers can't resolve __FUNCTION__ in lambdas; needing the _NOFN-logger macros therefore
-add_subdirectory(thirdparty/quill)
+# required by zenon-sdk-cpp
+find_package(Boost 1.39.0 COMPONENTS system thread)
 
 # websocket client, connection to znnd
 # no need to build it currently, just using the connection_ws header
 #add_subdirectory(zenon-sdk-cpp)
 set(sdk_include "${PROJECT_SOURCE_DIR}/zenon-sdk-cpp/include" "${PROJECT_SOURCE_DIR}/zenon-sdk-cpp/thirdparty")
+set(wspp_include "${PROJECT_SOURCE_DIR}/zenon-sdk-cpp/thirdparty/websocketpp/")
+
+set(uws_include "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/src/")
+set(us_include "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/src")
+set(us_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/uSockets.a")
+
+if (${BORING_SSL})
+    set(ssl_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/boringssl/build/ssl/libssl.a")
+    set(crypto_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/boringssl/build/crypto/libcrypto.a")
+    set(decrepit_lib "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/boringssl/build/decrepit/libdecrepit.a")
+    set(ssl_libs "${ssl_lib}" "${crypto_lib}" "${decrepit_lib}")
+else()
+    find_package(OpenSSL REQUIRED)
+    set(ssl_libs ${OPENSSL_LIBRARIES})
+endif()
+
+# These must be the same versions that have been linked into uWebSockets.
+# When using OpenSSL on macos, that might not be the case by default.
+message(STATUS "Using ssl-libraries ${ssl_libs}")
+
+# logging in debug mode via plog
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    set(log_include "${PROJECT_SOURCE_DIR}/thirdparty/plog/include")
+else()
+    pkg_check_modules(SYSTEMD REQUIRED libsystemd)
+    set(BUILD_SPECIFIC_LIBS "{SYSTEMD_LIBRARIES}")
+endif()
+
 
 find_package(Threads REQUIRED)
+
 
 # unit test library catch2
 #add_subdirectory("${PROJECT_SOURCE_DIR}/thirdparty/catch2" REQUIRED)
@@ -68,7 +107,9 @@ file(GLOB SRC src/*.cpp)
 add_executable(znn_repro ${SRC})
 
 target_include_directories(znn_repro
-    PRIVATE ${lyra_include}
+    PRIVATE ${Boost_INCLUDE_DIR}
+    PRIVATE ${log_include}
+    PRIVATE ${wspp_include}
     PRIVATE ${uws_include}
     PRIVATE ${us_include}
     PRIVATE ${sdk_include})
@@ -76,12 +117,9 @@ target_include_directories(znn_repro
 target_link_libraries(znn_repro
     Threads::Threads
     ZLIB::ZLIB
-    quill::quill
-    "${SYSTEMD_LIBRARIES}"
-    "${ssl_lib}"
+    "${BUILD_SPECIFIC_LIBS}"
     "${us_lib}"
-    "${crypto_lib}"
-    "${decrepit_lib}")
+    "${ssl_libs}")
 
 ### install
 

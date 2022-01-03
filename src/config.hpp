@@ -1,6 +1,5 @@
 #pragma once
 
-#include "quill/LogLevel.h"
 #include <exception>
 #include <ios>
 #include <nlohmann/json.hpp>
@@ -151,14 +150,4 @@ namespace reverse::config
         throw exception{"Could not read configuration file"};
     }
 
-    inline auto quill_log_level(options const&)
-    {
-        static const std::unordered_map<std::string, quill::LogLevel> mapping = {{"debug", quill::LogLevel::Debug},
-                                                                                 {"info", quill::LogLevel::Info},
-                                                                                 {"warning", quill::LogLevel::Warning},
-                                                                                 {"error", quill::LogLevel::Error},
-                                                                                 {"all", quill::LogLevel::TraceL3}};
-
-        return mapping.at("info");
-    }
 } // namespace reverse::config
