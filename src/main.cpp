@@ -51,7 +51,7 @@ template <typename... Args> auto log_and_signal_error(int errnum, Args&&... args
 auto check_for_certfiles(std::filesystem::path keyfile, std::filesystem::path certfile) -> std::optional<std::string>
 {
     auto certpath = keyfile.parent_path();
-    logging::debug("Reading privkey and fullchain from %s", certpath);
+    logging::debug("Reading privkey and fullchain from %s", certpath.string());
 
     try
     {
@@ -79,18 +79,22 @@ auto run_until_signalled()
 
 int main(int, char**)
 {
+    // enable plog console logging in debug or journald logging in release (must be linux)
+    logging::init();
+
     reverse::config::options config;
     try
     {
+        reverse::config::create_config_if_not_exists();
         config = reverse::config::read_config_file();
     }
     catch (std::exception const& e)
     {
         return log_and_signal_error(1, "Error reading the configuration file from ",
-                                    reverse::config::detail::get_config_file(), ":", e.what());
+                                    reverse::config::detail::get_config_file().string(), ":", e.what());
     }
 
-    logging::debug(reverse::config::to_string(config));
+    logging::info(reverse::config::to_string(config));
 
     std::filesystem::path certs{config.certificates};
 

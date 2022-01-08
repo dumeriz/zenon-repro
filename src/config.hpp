@@ -29,6 +29,39 @@ namespace reverse::config
         auto what() const noexcept -> char const* override { return reason_.data(); }
     };
 
+    namespace detail
+    {
+        inline auto get_home_folder() -> std::filesystem::path
+        {
+            if (auto const* home = getenv("HOME"); home)
+            {
+                return home;
+            }
+            return getpwuid(getuid())->pw_dir;
+        }
+
+        inline auto get_config_folder() -> std::filesystem::path
+        {
+#ifdef __APPLE__
+            return std::filesystem::path(get_home_folder()) / "Library" / "znn-repro";
+#elif __linux__
+            return std::filesystem::path(get_home_folder()) / ".config" / "znn-repro";
+#endif
+        }
+
+        inline auto get_config_file() -> std::filesystem::path { return get_config_folder() / "config.json"; }
+
+        template <typename T> inline auto get_or_throw(nlohmann::json const& object, std::string_view key) -> T
+        {
+            if (object.contains(key))
+            {
+                return object.at(key.data()).get<T>(); // throws if wrong type
+            }
+
+            throw exception{std::string("Key ") + key.data() + " missing"};
+        }
+    } // namespace detail
+
     struct proxy
     {
         std::string node;
@@ -71,35 +104,40 @@ namespace reverse::config
         return oss.str();
     }
 
-    namespace detail
+    auto to_json(nlohmann::json& js, proxy const& p)
     {
+        js["node"] = p.node;
+        js["wss"] = p.wss;
+        js["port"] = p.port;
+        js["timeout"] = p.timeout;
+    }
 
-        inline auto get_home_folder() -> std::filesystem::path
-        {
-            if (auto const* home = getenv("HOME"); home)
-            {
-                return home;
-            }
-            return getpwuid(getuid())->pw_dir;
-        }
+    auto from_json(nlohmann::json const& js, proxy& p)
+    {
+        p.node = detail::get_or_throw<std::string>(js, "node");
+        p.wss = detail::get_or_throw<bool>(js, "wss");
+        p.port = detail::get_or_throw<uint16_t>(js, "port");
+        p.timeout = detail::get_or_throw<uint16_t>(js, "timeout");
+    }
 
-        inline auto get_config_folder() -> std::filesystem::path
-        {
-            return std::filesystem::path(get_home_folder()) / ".config" / "znn-repro";
-        }
+    auto to_json(nlohmann::json& js, options const& opts)
+    {
+        js["proxies"] = opts.proxies;
+        js["certificates"] = opts.certificates;
+    }
 
-        inline auto get_config_file() -> std::filesystem::path { return get_config_folder() / "config.json"; }
+    auto from_json(nlohmann::json const& js, options& opts)
+    {
+        opts.proxies = detail::get_or_throw<nlohmann::json>(js, "proxies");
+        opts.certificates = detail::get_or_throw<std::string>(js, "certificates");
+    }
 
-        template <typename T> inline auto get_or_throw(nlohmann::json const& object, std::string_view key) -> T
-        {
-            if (object.contains(key))
-            {
-                return object.at(key.data()).get<T>(); // throws if wrong type
-            }
+    inline auto default_proxy() -> proxy
+    {
+        return proxy{.node = "ws://localhost:35998", .wss = false, .port = 35999, .timeout = 100};
+    }
 
-            throw exception{std::string("Key ") + key.data() + " missing"};
-        }
-    } // namespace detail
+    inline auto default_options() -> options { return options{.proxies = {5, default_proxy()}}; }
 
     inline auto any_wss(options const& opts)
     {
@@ -118,26 +156,37 @@ namespace reverse::config
         return end != std::string::npos && end < proxy.node.size() ? std::stol(proxy.node.substr(end + 1)) : 1;
     }
 
+    inline auto write_config_file(options const& options)
+    {
+        std::ofstream ofs(detail::get_config_file());
+        if (!ofs.is_open())
+        {
+            throw exception{"Could not write-access configuration file"};
+        }
+        nlohmann::json js = options;
+        int indent{4};
+        ofs << js.dump(indent);
+    }
+
+    inline auto create_config_if_not_exists()
+    {
+        auto config_file{detail::get_config_file()};
+        if (!std::filesystem::is_regular_file(config_file))
+        {
+            auto directory{config_file};
+            std::filesystem::create_directories(directory.remove_filename());
+
+            write_config_file(default_options());
+        }
+    }
+
     inline auto read_config_file() -> options
     {
         std::ifstream ifs(detail::get_config_file());
 
         if (ifs.is_open())
         {
-            options opts;
-            auto const json = nlohmann::json::parse(ifs);
-            auto const proxies = detail::get_or_throw<nlohmann::json>(json, "proxies");
-            for (auto&& proxy : proxies)
-            {
-                auto const node = detail::get_or_throw<std::string>(proxy, "node");
-                auto const wss = detail::get_or_throw<bool>(proxy, "wss");
-                auto const port = detail::get_or_throw<uint16_t>(proxy, "port");
-                auto const timeout = detail::get_or_throw<uint16_t>(proxy, "timeout");
-
-                opts.proxies.push_back({.node = node, .wss = wss, .port = port, .timeout = timeout});
-            }
-
-            opts.certificates = detail::get_or_throw<std::string>(json, "certificates");
+            options opts = nlohmann::json::parse(ifs);
 
             if (opts.certificates.empty() && any_wss(opts))
             {

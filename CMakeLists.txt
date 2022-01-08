@@ -84,12 +84,13 @@ message(STATUS "Using ssl-libraries ${ssl_libs}")
 
 # logging in debug mode via plog
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-    set(log_include "${PROJECT_SOURCE_DIR}/thirdparty/plog/include")
+    add_subdirectory(thirdparty/fmt)
+    set(log_include "${PROJECT_SOURCE_DIR}/thirdparty/plog/include" "${PROJECT_SOURCE_DIR}/thirdparty/fmt/include")
+    set(BUILD_SPECIFIC_LIBS fmt::fmt-header-only)
 else()
     pkg_check_modules(SYSTEMD REQUIRED libsystemd)
     set(BUILD_SPECIFIC_LIBS "{SYSTEMD_LIBRARIES}")
 endif()
-
 
 find_package(Threads REQUIRED)
 

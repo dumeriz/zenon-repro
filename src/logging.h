@@ -8,20 +8,15 @@
 #include <plog/Init.h>
 #include <plog/Log.h>
 
-static plog::ColorConsoleAppender<plog::TxtFormatter> logger;
+#ifdef NDEBUG
+#include <format>
+#else
+#include <fmt/color.h>
+#include <fmt/format.h>
 #endif
 
-#include <sstream>
-
-namespace logging::detail
-{
-    template <typename... Args> auto stream_args(Args&&... args)
-    {
-        std::ostringstream oss;
-        (oss << ... << args);
-        return oss.str();
-    }
-} // namespace logging::detail
+static plog::ColorConsoleAppender<plog::TxtFormatter> logger;
+#endif
 
 namespace logging
 {
@@ -29,45 +24,45 @@ namespace logging
 
     inline auto init() {}
 
-    template <typename... Args> auto error(Args&&... args)
+    template <typename... Args> auto error(std::string_view fmt, Args&&... args)
     {
-        sd_journal_print(LOG_ERR, "%s", detail::stream_args(std::forward<Args>(args)...).data());
+        sd_journal_print(LOG_ERR, "%s", std::format(fmt, std::make_format_args(args...)).data());
     }
 
-    template <typename... Args> auto warning(Args&&... args)
+    template <typename... Args> auto warning(std::string_view fmt, Args&&... args)
     {
-        sd_journal_print(LOG_WARNING, "%s", detail::stream_args(std::forward<Args>(args)...).data());
+        sd_journal_print(LOG_WARNING, "%s", std::format(fmt, std::make_format_args(args...)).data());
     }
 
     template <typename... Args> auto debug(Args&&...) {}
 
-    template <typename... Args> auto info(Args&&...)
+    template <typename... Args> auto info(std::string_view fmt, Args&&...)
     {
-        sd_journal_print(LOG_INFO, "%s", detail::stream_args(std::forward<Args>(args)...).data());
+        sd_journal_print(LOG_INFO, "%s", std::format(fmt, std::make_format_args(args...)).data());
     }
 
 #else // logging via plog in Debug mode
 
     inline auto init() { plog::init(plog::debug, &logger); }
 
-    template <typename... Args> auto error(Args&&... args)
+    template <typename... Args> auto error(std::string_view fmt_str, Args&&... args)
     {
-        PLOG_ERROR << detail::stream_args(std::forward<Args>(args)...);
+        PLOG_ERROR << fmt::format(fmt::fg(fmt::color::red), fmt_str, args...);
     }
 
-    template <typename... Args> auto warning(Args&&... args)
+    template <typename... Args> auto warning(std::string_view fmt_str, Args&&... args)
     {
-        PLOG_WARNING << detail::stream_args(std::forward<Args>(args)...);
+        PLOG_WARNING << fmt::format(fmt::fg(fmt::color::yellow), fmt_str, args...);
     }
 
-    template <typename... Args> auto debug(Args&&... args)
+    template <typename... Args> auto debug(std::string_view fmt_str, Args&&... args)
     {
-        PLOG_DEBUG << detail::stream_args(std::forward<Args>(args)...);
+        PLOG_DEBUG << fmt::format(fmt::fg(fmt::color::blue), fmt_str, args...);
     }
 
-    template <typename... Args> auto info(Args&&... args)
+    template <typename... Args> auto info(std::string_view fmt_str, Args&&... args)
     {
-        PLOG_INFO << detail::stream_args(std::forward<Args>(args)...);
+        PLOG_INFO << fmt::format(fmt::fg(fmt::color::green), fmt_str, args...);
     }
 
 #endif

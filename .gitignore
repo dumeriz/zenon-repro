@@ -33,3 +33,6 @@
 build
 .cache
 xcode
+
+# temporaries
+*.swp
