@@ -1,10 +1,11 @@
+#pragma once
+
 #include "App.h"
 #include "WebSocket.h"
 #include "WebSocketData.h"
 #include "WebSocketProtocol.h"
 #include "libusockets.h"
 #include "logging.h"
-#include "request_handler.hpp"
 
 #include <cstdint>
 #include <exception>
@@ -14,9 +15,32 @@
 
 namespace reverse
 {
+    /// @brief A new instance of client_handler that will be associated with every new websocket client.
+    struct client_handler
+    {
+        virtual ~client_handler() = default;
+
+        /// @brief Process a single request from a websocket client.
+        ///
+        /// This method will be called in an async context.
+        ///
+        /// @param[in] request
+        /// @return the response to be send to the requesting client.
+        virtual auto operator()(std::string request) -> std::string = 0;
+
+        /// @brief State of this handler - if false, connected websocketclients will be disconnected and no new
+        /// connections will be accepted.
+        virtual operator bool() const = 0;
+    };
+
+    using client_handler_ptr = std::unique_ptr<client_handler>;
+
+    /// @brief Generates a new client_handler.
+    using client_handler_factory = std::function<client_handler_ptr()>;
+
     struct per_socket_data
     {
-        std::unique_ptr<handler> node_link;
+        client_handler_ptr handler;
     };
 
     class proxy_error : std::exception
@@ -30,7 +54,6 @@ namespace reverse
 
     namespace detail
     {
-
         // repeating the definition from uws:Websocket.h here, as it is burried there in a templated class unnecessarily
         template <bool SSL> using uws_result_t = typename uWS::WebSocket<SSL, true, per_socket_data>::SendStatus;
 
@@ -41,29 +64,48 @@ namespace reverse
         template <> struct ssl_bool<uWS::SSLApp>
         {
             static constexpr bool ssl = true;
+            using websocket_t = uWS::WebSocket<ssl, true, per_socket_data>;
         };
         template <> struct ssl_bool<uWS::App>
         {
             static constexpr bool ssl = false;
+            using websocket_t = uWS::WebSocket<ssl, true, per_socket_data>;
         };
+
+        template <typename App> using websocket_t = typename ssl_bool<std::decay_t<App>>::websocket_t;
+
+        template <typename App>
+        auto constexpr send_expect_result = uws_result_t<ssl_bool<typename std::decay_t<App>>::ssl>::SUCCESS;
+
+        inline auto is_handler_valid(client_handler_ptr const& h) { return h && static_cast<bool>(*h); }
+
+        inline auto make_client_handler(client_handler_factory nc) { return nc(); }
+
+        inline auto client_handler_execute(client_handler_ptr const& ncp, std::string request, uint16_t timeout)
+            -> std::optional<std::string>
+        {
+            auto fut = std::async(std::launch::async, [&] { return (*ncp)(request); });
+
+            if (std::future_status::ready == fut.wait_for(std::chrono::milliseconds(timeout)))
+            {
+                return std::make_optional(fut.get());
+            }
+            return std::nullopt;
+        }
     } // namespace detail
 
     class proxy
     {
         size_t id_;
         uint16_t port_;
-        std::string node_url_;
-        uint16_t node_port_;
+        client_handler_factory make_client_handler_;
 
         std::thread run_thread_;
         us_listen_socket_t* listen_socket_{nullptr};
         std::atomic_bool reject_connections_{false};
 
     public:
-        proxy(size_t id, uint16_t port, std::string_view node_url, uint16_t node_port)
-            : id_{id}, port_{port}, node_url_{node_url}, node_port_{node_port}
-        {
-        }
+        proxy(size_t id, uint16_t port, client_handler_factory nc) : id_{id}, port_{port}, make_client_handler_{nc} {}
 
         ~proxy()
         {
@@ -74,7 +116,7 @@ namespace reverse
 
             if (run_thread_.joinable())
             {
-                logging::info("{}: Waiting for thread", id_);
+                log_info("{}: Waiting for thread", id_);
                 run_thread_.join();
             }
         }
@@ -93,16 +135,24 @@ namespace reverse
 
         auto close() -> void
         {
-            logging::info("{}: Shutdown", id_);
+            log_info("{}: Shutdown", id_);
 
             reject_connections_.store(true);
             if (listen_socket_)
             {
-                logging::info("{}: Closing socket", id_);
+                log_info("{}: Closing socket", id_);
                 us_listen_socket_close(0, listen_socket_);
             }
 
             listen_socket_ = nullptr;
+        }
+
+        template <typename App> auto send_data(typename detail::websocket_t<App>* ws, std::string const& data)
+        {
+            if (auto code = ws->send(data, uWS::OpCode::TEXT); code != detail::send_expect_result<App>)
+            {
+                log_error("{}: SEND returned {}", id_, code);
+            }
         }
 
     private:
@@ -119,73 +169,58 @@ namespace reverse
 
                 if (opcode != uWS::TEXT)
                 {
-                    logging::warning("{}: Ignoring non-TEXT message (opcode {})", id_, static_cast<int>(opcode));
+                    log_warning("{}: Ignoring non-TEXT message (opcode {})", id_, static_cast<int>(opcode));
                     return;
                 }
 
-                auto& node_link{ws->getUserData()->node_link};
-                if (!*node_link)
+                auto& handler{ws->getUserData()->handler};
+                if (!detail::is_handler_valid(handler))
                 {
-                    logging::error("{}: Handler in invalid state; discarding message", id_);
+                    log_error("{}: Handler in invalid state; discarding message", id_);
                     return;
                 }
 
-                std::string msg{message};
-                auto result =
-                    std::async(std::launch::async, [m = std::move(msg), &node_link] { return (*node_link)(m); });
-
-                if (std::future_status::ready != result.wait_for(std::chrono::milliseconds(timeout)))
+                if (auto response{detail::client_handler_execute(handler, message.data(), timeout)})
                 {
-                    logging::error("{}: TIMEOUT after {}ms awaiting the handler result\n"
-                                   "If this happens often increase the timeout value",
-                                   id_, timeout);
-                    return;
+                    log_debug("{}: Sending {}", id_, response.value());
+                    send_data<App>(ws, response.value());
                 }
-
-                auto const response = result.get();
-
-                logging::debug("{}: Received response {}", id_, response);
-
-                using result_t = detail::uws_result_t<detail::ssl_bool<std::decay_t<App>>::ssl>;
-                if (auto code = ws->send(response, uWS::OpCode::TEXT); code != result_t::SUCCESS)
+                else
                 {
-                    logging::error("{}: SEND returned {}", id_, code);
+                    log_error("{}: TIMEOUT awaiting the handler result. "
+                              "If this happens often increase the timeout value",
+                              id_);
                 }
             };
 
-            // on_open: open a connection to the node for each websocket connection
+            // on_open: instantiate a handler for the new websocket client
             auto const on_open = [this](auto* ws)
             {
                 if (reject_connections_.load())
                 {
-                    logging::debug("{}: Rejecting connection from {}", id_, ws->getRemoteAddressAsText());
+                    log_debug("{}: Rejecting connection from {}", id_, ws->getRemoteAddressAsText());
                     ws->close();
                     return;
                 }
 
-                logging::info("{}: Connection from {}", id_, ws->getRemoteAddressAsText());
+                log_info("{}: Connection from {}", id_, ws->getRemoteAddressAsText());
                 auto* ud{ws->getUserData()};
 
-                try
+                ud->handler = make_client_handler_();
+
+                if (!detail::is_handler_valid(ud->handler))
                 {
-                    size_t const connection_timeout_s = 3;
-                    ud->node_link = std::make_unique<handler>(node_url_, node_port_, connection_timeout_s);
-                }
-                catch (connection_error const& err)
-                {
-                    logging::error("{}: Connection to node failed @ {}:{}", id_, node_url_, node_port_);
+                    log_error("{}: Invalidated handler", id_);
                     ws->close();
                     return;
                 }
-
-                logging::info("{}: Connected to node @ {}:{}", id_, node_url_, node_port_);
             };
 
             auto const on_close = [this](auto* ws, int code, std::string_view message)
             {
-                ws->getUserData()->node_link.reset();
-                logging::info("{}: CLOSE with remote={}. Code={}, message={}", id_, ws->getRemoteAddressAsText(), code,
-                              message);
+                ws->getUserData()->handler.reset();
+                log_info("{}: CLOSE with remote={}. Code={}, message={}", id_, ws->getRemoteAddressAsText(), code,
+                         message);
             };
 
             auto const on_drain = [this](auto* ws)
@@ -193,7 +228,7 @@ namespace reverse
                 auto amount = ws->getBufferedAmount();
                 if (amount)
                 {
-                    logging::debug("{}: ====> buffered data: {}", id_, amount);
+                    log_debug("{}: ====> buffered data: {}", id_, amount);
                 }
             };
 
@@ -202,7 +237,7 @@ namespace reverse
                 if (listen_socket)
                 {
                     listen_socket_ = listen_socket;
-                    logging::debug("{}: Listening on port {}", id_, port_);
+                    log_debug("{}: Listening on port {}", id_, port_);
                 }
             };
 
@@ -231,7 +266,7 @@ namespace reverse
 
             uws_app.template ws<per_socket_data>("/*", std::move(behavior)).listen(port_, on_listen).run();
 
-            logging::info("{}: Listener fallthrough", id_);
+            log_info("{}: Listener fallthrough", id_);
         }
     };
 } // namespace reverse

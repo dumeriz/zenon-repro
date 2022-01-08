@@ -137,7 +137,7 @@ namespace reverse::config
         return proxy{.node = "ws://localhost:35998", .wss = false, .port = 35999, .timeout = 100};
     }
 
-    inline auto default_options() -> options { return options{.proxies = {5, default_proxy()}}; }
+    inline auto default_options() -> options { return options{.proxies = {5, default_proxy()}, .certificates = ""}; }
 
     inline auto any_wss(options const& opts)
     {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "logging.h"
+#include "proxy.hpp"
 #include <connection_ws.hpp> // zenon-sdk-cpp
 
 #include <chrono>
@@ -19,12 +20,13 @@ namespace reverse
         auto what() const noexcept -> const char* override { return reason_.data(); }
     };
 
-    class handler
+    class node_connection : public client_handler
     {
         std::unique_ptr<sdk::ws_connector> client_;
 
     public:
-        handler(std::string const& host, uint16_t port) : client_{std::make_unique<sdk::ws_connector>(host, port)}
+        node_connection(std::string const& host, uint16_t port)
+            : client_{std::make_unique<sdk::ws_connector>(host, port)}
         {
             if (!client_->connected())
             {
@@ -32,7 +34,7 @@ namespace reverse
             }
         }
 
-        handler(std::string const& host, uint16_t port, uint16_t timeout_s)
+        node_connection(std::string const& host, uint16_t port, uint16_t timeout_s)
         {
             auto timeout{std::chrono::system_clock::now() + std::chrono::seconds(timeout_s)};
 
@@ -50,14 +52,22 @@ namespace reverse
             }
         }
 
-        inline auto operator()(std::string request)
+        ~node_connection() override = default;
+
+        inline auto operator()(std::string request) -> std::string override
         {
             auto response = client_->Send(request);
-            logging::debug("{} => {}", request, response);
+            log_debug("{} => {}", request, response);
             return response;
             // return client_.Send(request);
         }
 
-        operator bool() const { return client_->connected(); }
+        operator bool() const override { return client_->connected(); }
     };
+
+    auto make_node_connection_method(std::string host, uint16_t port, uint16_t timeout) -> client_handler_factory
+    {
+        auto nc = [=]() -> client_handler_ptr { return std::make_unique<node_connection>(host, port, timeout); };
+        return nc;
+    }
 } // namespace reverse

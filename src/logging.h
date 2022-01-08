@@ -1,22 +1,20 @@
 #pragma once
 
+#include <fmt/format.h>
+
 #ifdef NDEBUG
 #include <systemd/sd-journal.h>
 #else
+#include <fmt/color.h>
 #include <plog/Appenders/ColorConsoleAppender.h>
 #include <plog/Formatters/TxtFormatter.h>
 #include <plog/Init.h>
 #include <plog/Log.h>
 
-#ifdef NDEBUG
-#include <format>
-#else
-#include <fmt/color.h>
-#include <fmt/format.h>
-#endif
-
 static plog::ColorConsoleAppender<plog::TxtFormatter> logger;
 #endif
+
+
 
 namespace logging
 {
@@ -24,46 +22,19 @@ namespace logging
 
     inline auto init() {}
 
-    template <typename... Args> auto error(std::string_view fmt, Args&&... args)
-    {
-        sd_journal_print(LOG_ERR, "%s", std::format(fmt, std::make_format_args(args...)).data());
-    }
-
-    template <typename... Args> auto warning(std::string_view fmt, Args&&... args)
-    {
-        sd_journal_print(LOG_WARNING, "%s", std::format(fmt, std::make_format_args(args...)).data());
-    }
-
-    template <typename... Args> auto debug(Args&&...) {}
-
-    template <typename... Args> auto info(std::string_view fmt, Args&&...)
-    {
-        sd_journal_print(LOG_INFO, "%s", std::format(fmt, std::make_format_args(args...)).data());
-    }
+#define log_error(fmt_str, ...) sd_journal_print(LOG_ERR, "%s", std::format(fmt_str, __VA_ARGS__).data());
+#define log_warning(fmt_str, ...) sd_journal_print(LOG_WARNING, "%s", std::format(fmt_str, __VA_ARGS__).data());
+#define log_debug(fmt_str, ...);
+#define log_info(fmt_str, ...) sd_journal_print(LOG_INFO, "%s", std::format(fmt_str, __VA_ARGS__).data());
 
 #else // logging via plog in Debug mode
 
     inline auto init() { plog::init(plog::debug, &logger); }
 
-    template <typename... Args> auto error(std::string_view fmt_str, Args&&... args)
-    {
-        PLOG_ERROR << fmt::format(fmt::fg(fmt::color::red), fmt_str, args...);
-    }
-
-    template <typename... Args> auto warning(std::string_view fmt_str, Args&&... args)
-    {
-        PLOG_WARNING << fmt::format(fmt::fg(fmt::color::yellow), fmt_str, args...);
-    }
-
-    template <typename... Args> auto debug(std::string_view fmt_str, Args&&... args)
-    {
-        PLOG_DEBUG << fmt::format(fmt::fg(fmt::color::blue), fmt_str, args...);
-    }
-
-    template <typename... Args> auto info(std::string_view fmt_str, Args&&... args)
-    {
-        PLOG_INFO << fmt::format(fmt::fg(fmt::color::green), fmt_str, args...);
-    }
+#define log_error(fmt_str, ...) PLOG_ERROR << fmt::format(fmt::fg(fmt::color::red), fmt_str, __VA_ARGS__);
+#define log_warning(fmt_str, ...) PLOG_WARNING << fmt::format(fmt::fg(fmt::color::yellow), fmt_str, __VA_ARGS__);
+#define log_debug(fmt_str, ...) PLOG_DEBUG << fmt::format(fmt::fg(fmt::color::blue), fmt_str, __VA_ARGS__);
+#define log_info(fmt_str, ...) PLOG_INFO << fmt::format(fmt::runtime(fmt_str), __VA_ARGS__);
 
 #endif
 } // namespace logging

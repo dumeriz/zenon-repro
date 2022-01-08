@@ -33,9 +33,14 @@ endif()
 
 message(STATUS "Building in ${CMAKE_BUILD_TYPE} mode")
 
+# apparently this is not being set on all platforms
+if (NOT CMAKE_BUILD_TYPE MATCHES Debug)
+    add_definitions(-DNDEBUG)
+endif()
+
 set(CMAKE_CXX_FLAGS "-Wall -Wextra")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Ofast -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Ofast")
 
 ### subprojects and libraries
 
@@ -84,16 +89,16 @@ message(STATUS "Using ssl-libraries ${ssl_libs}")
 
 # logging in debug mode via plog
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-    add_subdirectory(thirdparty/fmt)
     set(log_include "${PROJECT_SOURCE_DIR}/thirdparty/plog/include" "${PROJECT_SOURCE_DIR}/thirdparty/fmt/include")
-    set(BUILD_SPECIFIC_LIBS fmt::fmt-header-only)
 else()
     pkg_check_modules(SYSTEMD REQUIRED libsystemd)
-    set(BUILD_SPECIFIC_LIBS "{SYSTEMD_LIBRARIES}")
+    set(BUILD_SPECIFIC_LIBS "${SYSTEMD_LIBRARIES}")
 endif()
 
 find_package(Threads REQUIRED)
 
+# std::format not widely supported yet
+add_subdirectory(thirdparty/fmt)
 
 # unit test library catch2
 #add_subdirectory("${PROJECT_SOURCE_DIR}/thirdparty/catch2" REQUIRED)
@@ -118,6 +123,7 @@ target_include_directories(znn_repro
 target_link_libraries(znn_repro
     Threads::Threads
     ZLIB::ZLIB
+    fmt::fmt
     "${BUILD_SPECIFIC_LIBS}"
     "${us_lib}"
     "${ssl_libs}")

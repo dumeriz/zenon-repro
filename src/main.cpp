@@ -39,9 +39,10 @@ auto sigterm_handler(int) -> void
 
 auto sigint_handler(int) -> void { sigterm.store(true); }
 
-template <typename... Args> auto log_and_signal_error(int errnum, Args&&... args)
+template <typename... Args> auto log_and_signal_error(int errnum, std::string_view fmt_str, Args&&... args)
 {
-    logging::error(std::forward<Args>(args)...);
+    // logging::error(std::forward<Args>(args)...);
+    log_error(fmt_str, std::forward<Args>(args)...);
 #ifdef NDEBUG
     systemd_signal("ERRNO=" + std::to_string(-errnum));
 #endif
@@ -51,7 +52,8 @@ template <typename... Args> auto log_and_signal_error(int errnum, Args&&... args
 auto check_for_certfiles(std::filesystem::path keyfile, std::filesystem::path certfile) -> std::optional<std::string>
 {
     auto certpath = keyfile.parent_path();
-    logging::debug("Reading privkey and fullchain from %s", certpath.string());
+    // logging::debug("Reading privkey and fullchain from %s", certpath.string());
+    log_debug("Reading privkey and fullchain from %s", certpath.string());
 
     try
     {
@@ -90,11 +92,11 @@ int main(int, char**)
     }
     catch (std::exception const& e)
     {
-        return log_and_signal_error(1, "Error reading the configuration file from ",
-                                    reverse::config::detail::get_config_file().string(), ":", e.what());
+        return log_and_signal_error(1, "Error reading the configuration file from {}: {}",
+                                    reverse::config::detail::get_config_file().string(), e.what());
     }
 
-    logging::info(reverse::config::to_string(config));
+    log_info("Config: {}", reverse::config::to_string(config));
 
     std::filesystem::path certs{config.certificates};
 
@@ -105,7 +107,7 @@ int main(int, char**)
     {
         if (auto certfile_error = check_for_certfiles(keyfile, certfile); certfile_error)
         {
-            return log_and_signal_error(2, "SSL-configuration failure: ", certfile_error.value());
+            return log_and_signal_error(2, "SSL-configuration failure: {}", certfile_error.value());
         }
     }
 
@@ -139,7 +141,7 @@ int main(int, char**)
         auto failed_proxies = std::accumulate(
             start_results.begin(), start_results.end(), std::string(),
             [](auto acc, auto res) { return acc + (res.first ? "" : "[" + std::to_string(res.second) + "]"); });
-        return log_and_signal_error(3, "Error starting proxies " + failed_proxies);
+        return log_and_signal_error(3, "Error starting proxies {}", failed_proxies);
     }
 
     systemd_signal("STOPPING=1");
