@@ -7,11 +7,14 @@
 #include "libusockets.h"
 #include "logging.h"
 
+#include <bits/stdint-uintn.h>
 #include <cstdint>
 #include <exception>
 #include <future>
 #include <string>
 #include <thread>
+
+#define detach_handler
 
 namespace reverse
 {
@@ -159,8 +162,9 @@ namespace reverse
         template <typename App> auto run(uint16_t timeout, std::string keyfile, std::string certfile) -> void
         {
             // on-message: forward-copy the received message to the asynchronously called handler
-            auto const on_message = [this, timeout](auto* ws, std::string_view message, uWS::OpCode opcode)
-            {
+            auto const on_message = [this, timeout](auto* ws, std::string_view message, uWS::OpCode opcode) {
+                log_debug("{}: Received message {}, size={}", id_, message, message.size());
+
                 if (reject_connections_)
                 {
                     ws->end(); // send FIN and close socket
@@ -180,6 +184,22 @@ namespace reverse
                     return;
                 }
 
+#ifdef detach_handler
+                auto* thisloop{uWS::Loop::get()};
+
+                std::thread(
+                    [&, thisloop, ws](std::string req) {
+                        log_debug("{}: Forwarding {}, size={}", id_, req, req.length());
+                        if (auto& handler{ws->getUserData()->handler})
+                        {
+                            auto const response{(*handler)(req)};
+                            log_debug("{}: Received response {}", id_, response);
+                            thisloop->defer([this, ws, res = std::move(response)] { send_data<App>(ws, res); });
+                        }
+                    },
+                    std::string{message})
+                    .detach();
+#else
                 if (auto response{detail::client_handler_execute(handler, message.data(), timeout)})
                 {
                     log_debug("{}: Sending {}", id_, response.value());
@@ -191,11 +211,18 @@ namespace reverse
                               "If this happens often increase the timeout value",
                               id_);
                 }
+#endif
+            };
+
+            auto on_upgrade = [this](auto* res, auto* req, auto* ctx) {
+                log_debug("{}: Upgrade request", id_);
+                res->template upgrade<per_socket_data>(
+                    {.handler = make_client_handler_()}, req->getHeader("sec-websocket-key"),
+                    req->getHeader("sec-websocket-protocol"), req->getHeader("sec-websocket-extensions"), ctx);
             };
 
             // on_open: instantiate a handler for the new websocket client
-            auto const on_open = [this](auto* ws)
-            {
+            auto const on_open = [this](auto* ws) {
                 if (reject_connections_.load())
                 {
                     log_debug("{}: Rejecting connection from {}", id_, ws->getRemoteAddressAsText());
@@ -206,7 +233,10 @@ namespace reverse
                 log_info("{}: Connection from {}", id_, ws->getRemoteAddressAsText());
                 auto* ud{ws->getUserData()};
 
-                ud->handler = make_client_handler_();
+                if (!ud->handler)
+                {
+                    ud->handler = make_client_handler_();
+                }
 
                 if (!detail::is_handler_valid(ud->handler))
                 {
@@ -216,15 +246,13 @@ namespace reverse
                 }
             };
 
-            auto const on_close = [this](auto* ws, int code, std::string_view message)
-            {
-                ws->getUserData()->handler.reset();
+            auto const on_close = [this](auto* ws, int code, std::string_view message) {
+                // ws->getUserData()->handler.reset();
                 log_info("{}: CLOSE with remote={}. Code={}, message={}", id_, ws->getRemoteAddressAsText(), code,
                          message);
             };
 
-            auto const on_drain = [this](auto* ws)
-            {
+            auto const on_drain = [this](auto* ws) {
                 auto amount = ws->getBufferedAmount();
                 if (amount)
                 {
@@ -232,8 +260,7 @@ namespace reverse
                 }
             };
 
-            auto const on_listen = [&](auto* listen_socket)
-            {
+            auto const on_listen = [&](auto* listen_socket) {
                 if (listen_socket)
                 {
                     listen_socket_ = listen_socket;
@@ -256,7 +283,7 @@ namespace reverse
                 .closeOnBackpressureLimit = false,
                 .resetIdleTimeoutOnSend = false,
                 .sendPingsAutomatically = true,
-                .upgrade = nullptr,
+                .upgrade = on_upgrade,
                 .open = on_open,
                 .message = on_message,
                 .drain = on_drain,

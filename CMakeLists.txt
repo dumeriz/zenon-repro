@@ -38,7 +38,8 @@ if (NOT CMAKE_BUILD_TYPE MATCHES Debug)
     add_definitions(-DNDEBUG)
 endif()
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra")
+# TODO: Fix problems in jsonrpccxx instead of ignoring sign-compare error globally
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-error=sign-compare")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Ofast")
 
@@ -46,28 +47,16 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Ofast")
 
 include(FindPkgConfig)
 include(ExternalProject)
-
-# websockets
-# can't really add more complex make commands here, so uWS must be built seperately
-#ExternalProject_Add(uWebSockets
-#    SOURCE_DIR ${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets
-#    BUILD_IN_SOURCE 1
-#    CONFIGURE_COMMAND ""
-#    BUILD_COMMAND make
-#    INSTALL_COMMAND ""
-#)
-
-# required by uWebSockets
-find_package(ZLIB)
-
-# required by zenon-sdk-cpp
-find_package(Boost 1.39.0 COMPONENTS system thread)
+include(FetchContent)
 
 # websocket client, connection to znnd
-# no need to build it currently, just using the connection_ws header
-#add_subdirectory(zenon-sdk-cpp)
-set(sdk_include "${PROJECT_SOURCE_DIR}/zenon-sdk-cpp/include" "${PROJECT_SOURCE_DIR}/zenon-sdk-cpp/thirdparty")
-set(wspp_include "${PROJECT_SOURCE_DIR}/zenon-sdk-cpp/thirdparty/websocketpp/")
+# no need to build it currently, just using the headers
+# provides variables SDK_INCLUDES and SDK_LIBS
+add_subdirectory(zenon-sdk-cpp)
+
+set(json_include ${jsonrpccxx_SOURCE_DIR}/vendor)
+set(sdk_include ${SDK_INCLUDES})
+message(STATUS ${sdk_include})
 
 set(uws_include "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/src/")
 set(us_include "${PROJECT_SOURCE_DIR}/thirdparty/uWebSockets/uSockets/src")
@@ -113,7 +102,6 @@ file(GLOB SRC src/*.cpp)
 add_executable(znn_repro ${SRC})
 
 target_include_directories(znn_repro
-    PRIVATE ${Boost_INCLUDE_DIR}
     PRIVATE ${log_include}
     PRIVATE ${wspp_include}
     PRIVATE ${uws_include}
@@ -121,8 +109,8 @@ target_include_directories(znn_repro
     PRIVATE ${sdk_include})
 
 target_link_libraries(znn_repro
+    ${SDK_LIBS}
     Threads::Threads
-    ZLIB::ZLIB
     fmt::fmt
     "${BUILD_SPECIFIC_LIBS}"
     "${us_lib}"

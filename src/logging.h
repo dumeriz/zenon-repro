@@ -14,18 +14,16 @@
 static plog::ColorConsoleAppender<plog::TxtFormatter> logger;
 #endif
 
-
-
 namespace logging
 {
 #ifdef NDEBUG // logging via journald in Release mode
 
     inline auto init() {}
 
-#define log_error(fmt_str, ...) sd_journal_print(LOG_ERR, "%s", std::format(fmt_str, __VA_ARGS__).data());
-#define log_warning(fmt_str, ...) sd_journal_print(LOG_WARNING, "%s", std::format(fmt_str, __VA_ARGS__).data());
-#define log_debug(fmt_str, ...);
-#define log_info(fmt_str, ...) sd_journal_print(LOG_INFO, "%s", std::format(fmt_str, __VA_ARGS__).data());
+#define log_error(fmt_str, ...) sd_journal_print(LOG_ERR, "%s", fmt::format(fmt_str, __VA_ARGS__).data());
+#define log_warning(fmt_str, ...) sd_journal_print(LOG_WARNING, "%s", fmt::format(fmt_str, __VA_ARGS__).data());
+#define log_debug(fmt_str, ...) ;
+#define log_info(fmt_str, ...) sd_journal_print(LOG_INFO, "%s", fmt::format(fmt_str, __VA_ARGS__).data());
 
 #else // logging via plog in Debug mode
 

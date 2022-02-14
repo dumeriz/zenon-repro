@@ -76,14 +76,14 @@ namespace reverse::config
         std::string certificates;
     };
 
-    auto operator<<(std::ostream& os, proxy const& proxy) -> std::ostream&
+    inline auto operator<<(std::ostream& os, proxy const& proxy) -> std::ostream&
     {
         os << "Node=" << proxy.node << ", WSS=" << std::boolalpha << proxy.wss << ", Port=" << proxy.port
            << ", Timeout=" << proxy.timeout;
         return os;
     }
 
-    auto operator<<(std::ostream& os, options const& opt) -> std::ostream&
+    inline auto operator<<(std::ostream& os, options const& opt) -> std::ostream&
     {
         os << "Proxies: " << std::endl;
         for (size_t i{}; i < opt.proxies.size(); i++)
@@ -97,14 +97,14 @@ namespace reverse::config
         return os;
     }
 
-    auto to_string(options const& opts)
+    inline auto to_string(options const& opts)
     {
         std::ostringstream oss;
         oss << opts;
         return oss.str();
     }
 
-    auto to_json(nlohmann::json& js, proxy const& p)
+    inline auto to_json(nlohmann::json& js, proxy const& p)
     {
         js["node"] = p.node;
         js["wss"] = p.wss;
@@ -112,7 +112,7 @@ namespace reverse::config
         js["timeout"] = p.timeout;
     }
 
-    auto from_json(nlohmann::json const& js, proxy& p)
+    inline auto from_json(nlohmann::json const& js, proxy& p)
     {
         p.node = detail::get_or_throw<std::string>(js, "node");
         p.wss = detail::get_or_throw<bool>(js, "wss");
@@ -120,15 +120,15 @@ namespace reverse::config
         p.timeout = detail::get_or_throw<uint16_t>(js, "timeout");
     }
 
-    auto to_json(nlohmann::json& js, options const& opts)
+    inline auto to_json(nlohmann::json& js, options const& opts)
     {
         js["proxies"] = opts.proxies;
         js["certificates"] = opts.certificates;
     }
 
-    auto from_json(nlohmann::json const& js, options& opts)
+    inline auto from_json(nlohmann::json const& js, options& opts)
     {
-        opts.proxies = detail::get_or_throw<nlohmann::json>(js, "proxies");
+        opts.proxies = std::vector<proxy>{detail::get_or_throw<nlohmann::json>(js, "proxies")};
         opts.certificates = detail::get_or_throw<std::string>(js, "certificates");
     }
 
